@@ -3,8 +3,7 @@ database.py
 ------------
 Database Module (CampusCare)
 
-Central data-access layer. Every other module talks to SQLite only
-through the functions defined here.
+
 """
 
 import sqlite3
