@@ -2,16 +2,20 @@
 database.py
 ------------
 Database Module (CampusCare)
+Author: CampusCare Development Team
 
-
+Central data-access layer for the CampusCare complaint management system. 
+Every other module talks to SQLite only through the functions defined here.
 """
 
+import os
 import sqlite3
 import hashlib
 from datetime import datetime
 from contextlib import contextmanager
 
-DB_NAME = "campuscare.db"
+# Ensures the DB is created in the same directory as this script
+DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), "campuscare.db")
 
 
 @contextmanager
@@ -37,6 +41,7 @@ def create_tables():
                 role TEXT NOT NULL CHECK(role IN ('student', 'admin'))
             )
         """)
+        # Removed 'priority' to match the ER Diagram and Table 3
         conn.execute("""
             CREATE TABLE IF NOT EXISTS Complaints (
                 complaint_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +49,6 @@ def create_tables():
                 category TEXT NOT NULL,
                 location TEXT NOT NULL,
                 description TEXT NOT NULL,
-                priority TEXT NOT NULL DEFAULT 'Medium',
                 status TEXT NOT NULL DEFAULT 'Pending',
                 department TEXT DEFAULT 'Unassigned',
                 created_at TEXT NOT NULL,
@@ -62,15 +66,10 @@ def create_tables():
             )
         """)
 
-        # --- STEP 3: Performance Indexes ---
-        # 1. Student dashboard me fast queries ke liye
+        # Performance Indexes
         conn.execute("CREATE INDEX IF NOT EXISTS idx_complaints_user_id ON Complaints(user_id);")
-        
-        # 2. Admin dashboard filters (Status & Category) ko fast karne ke liye
         conn.execute("CREATE INDEX IF NOT EXISTS idx_complaints_status ON Complaints(status);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_complaints_category ON Complaints(category);")
-        
-        # 3. Complaint audit trail fetch karne ke liye
         conn.execute("CREATE INDEX IF NOT EXISTS idx_history_complaint_id ON Complaint_History(complaint_id);")
 
 
@@ -79,8 +78,18 @@ def format_complaint_id(complaint_id):
     return f"CC-{complaint_id:04d}"
 
 
+def parse_complaint_id(display_id):
+    """Converts a display ID (e.g., 'CC-0007') back to its numeric primary key."""
+    try:
+        if isinstance(display_id, str) and display_id.upper().startswith("CC-"):
+            return int(display_id.split("-")[1])
+        return int(display_id)
+    except (ValueError, IndexError):
+        return None
+
+
 def hash_password(password):
-    """Plain-text password ko SHA-256 hash string me convert karta hai."""
+    """Converts a plain-text password into a SHA-256 hash string."""
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
@@ -113,22 +122,41 @@ def user_count():
 
 # ----------------------------------------------------------- Complaints ----
 
-def add_complaint(user_id, category, location, description, priority):
+def add_history(complaint_id, old_status, new_status, changed_at=None):
+    """Explicitly separated to match report requirements."""
+    if not changed_at:
+        changed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO Complaint_History (complaint_id, old_status, new_status, changed_at)
+               VALUES (?, ?, ?, ?)""",
+            (complaint_id, old_status, new_status, changed_at),
+        )
+
+
+def add_complaint(user_id, category, location, description):
+    """Removed 'priority' to match report schema."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         cur = conn.execute(
             """INSERT INTO Complaints
-               (user_id, category, location, description, priority, status, department, created_at)
-               VALUES (?, ?, ?, ?,?, 'Pending', 'Unassigned', ?)""",
-            (user_id, category, location, description, priority, now),
+               (user_id, category, location, description, status, department, created_at)
+               VALUES (?, ?, ?, ?, 'Pending', 'Unassigned', ?)""",
+            (user_id, category, location, description, now),
         )
         complaint_id = cur.lastrowid
-        conn.execute(
-            """INSERT INTO Complaint_History (complaint_id, old_status, new_status, changed_at)
-               VALUES (?, NULL, 'Pending', ?)""",
-            (complaint_id, now),
-        )
+        # Calling the explicit add_history function
+        add_history(complaint_id, None, 'Pending', now)
         return complaint_id
+
+
+def get_complaint_by_id(complaint_id):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM Complaints WHERE complaint_id = ?",
+            (complaint_id,)
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def get_complaints_by_user(user_id):
@@ -140,7 +168,8 @@ def get_complaints_by_user(user_id):
         return [dict(r) for r in rows]
 
 
-def get_all_complaints(status_filter=None, category_filter=None, priority_filter=None):
+def get_all_complaints(status_filter=None, category_filter=None):
+    """Removed 'priority_filter' to match report schema."""
     query = """SELECT c.*, u.name AS student_name
                FROM Complaints c JOIN Users u ON c.user_id = u.user_id
                WHERE 1=1"""
@@ -151,9 +180,6 @@ def get_all_complaints(status_filter=None, category_filter=None, priority_filter
     if category_filter and category_filter != "All":
         query += " AND c.category = ?"
         params.append(category_filter)
-    if priority_filter and priority_filter != "All":
-        query += " AND c.priority = ?"
-        params.append(priority_filter)
 
     query += " ORDER BY c.complaint_id DESC"
     with get_connection() as conn:
@@ -161,32 +187,40 @@ def get_all_complaints(status_filter=None, category_filter=None, priority_filter
         return [dict(r) for r in rows]
 
 
-def update_complaint_status(complaint_id, new_status, department=None):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def assign_department(complaint_id, department):
+    """Explicitly separated to match report requirements."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE Complaints SET department = ? WHERE complaint_id = ?",
+            (department, complaint_id),
+        )
+        return True
+
+
+def update_complaint_status(complaint_id, new_status):
+    """Now handles ONLY status changes, as per the report."""
+    VALID_STATUSES = ("Pending", "In Progress", "Resolved")
+    if new_status not in VALID_STATUSES:
+        raise ValueError(f"Invalid status '{new_status}'. Must be one of {VALID_STATUSES}")
+
     with get_connection() as conn:
         old = conn.execute(
             "SELECT status FROM Complaints WHERE complaint_id = ?", (complaint_id,)
         ).fetchone()
-        old_status = old["status"] if old else None
+        
+        if old is None:
+            return False
+            
+        old_status = old["status"]
 
-        if department is not None:
-            conn.execute(
-                "UPDATE Complaints SET status = ?, department = ? WHERE complaint_id = ?",
-                (new_status, department, complaint_id),
-            )
-        else:
+        if old_status != new_status:
             conn.execute(
                 "UPDATE Complaints SET status = ? WHERE complaint_id = ?",
                 (new_status, complaint_id),
             )
-
-        if old_status != new_status:
-            conn.execute(
-                """INSERT INTO Complaint_History
-                   (complaint_id, old_status, new_status, changed_at)
-                   VALUES (?, ?, ?, ?)""",
-                (complaint_id, old_status, new_status, now),
-            )
+            # Call the explicit history function
+            add_history(complaint_id, old_status, new_status)
+        return True
 
 
 def get_complaint_history(complaint_id):
@@ -214,3 +248,28 @@ def get_statistics():
             "by_status": {r["status"]: r["count"] for r in status_rows},
             "by_category": {r["category"]: r["count"] for r in category_rows},
         }
+
+# ------------------------------------------------------------- Initialization ----
+
+def seed_data():
+    """Populates the database with an admin, sample students, and initial complaints if empty."""
+    create_tables()
+    if user_count() == 0:
+        print("Seeding initial database records...")
+        admin_id = add_user("Admin User", "admin@campus.edu", "admin123", "admin")
+        student1 = add_user("Arjun Singh", "arjun@student.edu", "pass123", "student")
+        student2 = add_user("Priya Sharma", "priya@student.edu", "pass123", "student")
+        
+        # Priority argument removed to match schema
+        c1 = add_complaint(student1, "Maintenance", "Hostel Block A", "Leaking pipe in washroom")
+        c2 = add_complaint(student2, "IT Support", "Main Library", "Wi-Fi access point dead")
+        c3 = add_complaint(student1, "Food", "Cafeteria", "Quality of lunch was poor today")
+        
+        # Separated into individual function calls to match the new architecture
+        update_complaint_status(c1, "In Progress")
+        assign_department(c1, "Plumbing Dept")
+        
+        update_complaint_status(c2, "Resolved")
+        assign_department(c2, "IT Services")
+        
+        print("Seed data creation complete.")
