@@ -105,11 +105,35 @@ def add_user(name, email, password, role):
         return cur.lastrowid
 
 
+def email_exists(email):
+    """True if an account with this email is already registered (case-insensitive)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM Users WHERE lower(email) = lower(?)", (email,)
+        ).fetchone()
+        return row is not None
+
+
+def register_student(name, email, password):
+    """Self-service signup. Always creates a 'student' account (never an admin).
+
+    Returns the new user_id, or None if the email is already registered.
+    """
+    email = email.strip().lower()
+    if email_exists(email):
+        return None
+    try:
+        return add_user(name.strip(), email, password, "student")
+    except sqlite3.IntegrityError:
+        # lost a race with another signup using the same email
+        return None
+
+
 def authenticate_user(email, password):
     hashed_pwd = hash_password(password)
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM Users WHERE email = ? AND password = ?",
+            "SELECT * FROM Users WHERE lower(email) = lower(?) AND password = ?",
             (email, hashed_pwd),
         ).fetchone()
         return dict(row) if row else None
