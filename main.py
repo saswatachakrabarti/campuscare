@@ -8,27 +8,15 @@ the user to the student or admin screen depending on their role.
 """
 
 import tkinter as tk
-from tkinter import ttk
 
 import database
 import login
 import admin
-
-
-def clear_window(root):
-    for widget in root.winfo_children():
-        widget.destroy()
+import complaint
 
 
 def show_student_screen(root, user):
-    """PLACEHOLDER. Replace with the Complaint Submission module, e.g.
-    complaint.show_student_dashboard(root, user, on_logout)"""
-    clear_window(root)
-    frame = ttk.Frame(root, padding=30)
-    frame.place(relx=0.5, rely=0.5, anchor="center")
-    ttk.Label(frame, text=f"Welcome, {user['name']} (Student)", font=("Arial", 16)).pack(pady=10)
-    ttk.Label(frame, text="Student dashboard coming soon...").pack(pady=10)
-    ttk.Button(frame, text="Logout", command=lambda: show_login_screen(root)).pack(pady=10)
+    complaint.show_student_dashboard(root, user, on_logout=lambda: show_login_screen(root))
 
 
 def show_admin_screen(root, user):
@@ -36,7 +24,7 @@ def show_admin_screen(root, user):
 
 
 def show_login_screen(root):
-    # the admin screen makes the window bigger, so reset it for the login card
+    # the dashboards make the window bigger, so reset it for the login card
     root.minsize(0, 0)
     root.geometry("800x600")
 
