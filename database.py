@@ -122,16 +122,24 @@ def user_count():
 
 # ----------------------------------------------------------- Complaints ----
 
-def add_history(complaint_id, old_status, new_status, changed_at=None):
-    """Explicitly separated to match report requirements."""
+def add_history(complaint_id, old_status, new_status, changed_at=None, conn=None):
+    """Explicitly separated to match report requirements.
+
+    Pass `conn` when you are already inside a get_connection() block (as
+    add_complaint and update_complaint_status are). SQLite lets only one
+    connection write at a time, so opening a second connection in that
+    situation waits and then fails with 'database is locked'.
+    """
     if not changed_at:
         changed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with get_connection() as conn:
-        conn.execute(
-            """INSERT INTO Complaint_History (complaint_id, old_status, new_status, changed_at)
-               VALUES (?, ?, ?, ?)""",
-            (complaint_id, old_status, new_status, changed_at),
-        )
+    sql = """INSERT INTO Complaint_History (complaint_id, old_status, new_status, changed_at)
+             VALUES (?, ?, ?, ?)"""
+    params = (complaint_id, old_status, new_status, changed_at)
+    if conn is not None:
+        conn.execute(sql, params)
+        return
+    with get_connection() as own_conn:
+        own_conn.execute(sql, params)
 
 
 def add_complaint(user_id, category, location, description):
@@ -145,8 +153,8 @@ def add_complaint(user_id, category, location, description):
             (user_id, category, location, description, now),
         )
         complaint_id = cur.lastrowid
-        # Calling the explicit add_history function
-        add_history(complaint_id, None, 'Pending', now)
+        # Calling the explicit add_history function (same connection, see its docstring)
+        add_history(complaint_id, None, 'Pending', now, conn=conn)
         return complaint_id
 
 
@@ -218,8 +226,8 @@ def update_complaint_status(complaint_id, new_status):
                 "UPDATE Complaints SET status = ? WHERE complaint_id = ?",
                 (new_status, complaint_id),
             )
-            # Call the explicit history function
-            add_history(complaint_id, old_status, new_status)
+            # Call the explicit history function (same connection, see its docstring)
+            add_history(complaint_id, old_status, new_status, conn=conn)
         return True
 
 

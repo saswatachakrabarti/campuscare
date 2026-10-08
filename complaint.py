@@ -4,7 +4,7 @@ complaint.py
 Complaint Submission and Tracking Module (CampusCare, student side)
 
 Two tabs:
-  1. New Complaint  - form (category, location, priority, description),
+  1. New Complaint  - form (category, location, description),
                       validation, and the generated complaint ID after saving.
   2. My Complaints  - table of the student's own complaints, with search,
                       status filter, a progress tracker and the full status history.
@@ -25,7 +25,7 @@ from login import (  # same colours/fonts as the rest of the app
     FONT, FONT_SMALL, FONT_LABEL, _make_field,
 )
 from admin import (  # same categories/statuses as the admin screen
-    SUCCESS, WARNING, STATUSES, PRIORITIES, DEFAULT_CATEGORIES, STATUS_ROW_COLORS,
+    SUCCESS, WARNING, STATUSES, DEFAULT_CATEGORIES, STATUS_ROW_COLORS,
 )
 
 # ------------------------------------------------------------ settings ----
@@ -184,33 +184,6 @@ def show_student_dashboard(root, user, on_logout):
     tk.Label(col_loc, text="e.g. Room 301, Library, Hostel Block B", font=FONT_SMALL,
              bg=WHITE, fg=MUTED).pack(anchor="w", pady=(2, 0))
 
-    # priority chips
-    tk.Label(form, text="Priority", font=FONT_LABEL, bg=WHITE, fg=TEXT).pack(
-        anchor="w", pady=(14, 4))
-    priority_var = tk.StringVar(value="Medium")
-    chip_row = tk.Frame(form, bg=WHITE)
-    chip_row.pack(anchor="w")
-    chips = {}
-
-    def refresh_chips():
-        for p, chip in chips.items():
-            if priority_var.get() == p:
-                chip.config(bg=PRIMARY, fg=WHITE)
-            else:
-                chip.config(bg="#F1F5F9", fg=TEXT)
-
-    def choose_priority(p):
-        priority_var.set(p)
-        refresh_chips()
-
-    for p in PRIORITIES:
-        chip = tk.Label(chip_row, text=p, font=("Segoe UI", 10, "bold"),
-                        cursor="hand2", padx=22, pady=6)
-        chip.pack(side="left", padx=(0, 8))
-        chip.bind("<Button-1>", lambda e, p=p: choose_priority(p))
-        chips[p] = chip
-    refresh_chips()
-
     # description
     tk.Label(form, text="Description", font=FONT_LABEL, bg=WHITE, fg=TEXT).pack(
         anchor="w", pady=(14, 4))
@@ -239,7 +212,6 @@ def show_student_dashboard(root, user, on_logout):
         category_var.set(CATEGORY_PLACEHOLDER)
         location_var.set("")
         desc_text.delete("1.0", "end")
-        choose_priority("Medium")
         update_counter()
 
     def submit_complaint():
@@ -262,7 +234,7 @@ def show_student_dashboard(root, user, on_logout):
 
         try:
             complaint_id = database.add_complaint(
-                user["user_id"], category, location, description, priority_var.get()
+                user["user_id"], category, location, description
             )
         except Exception as error:  # never crash the window on a database problem
             set_form_message(f"Could not save the complaint: {error}")
@@ -317,9 +289,9 @@ def show_student_dashboard(root, user, on_logout):
     table_frame = tk.Frame(content, bg=WHITE, highlightbackground=BORDER, highlightthickness=1)
     table_frame.pack(side="left", fill="both", expand=True)
 
-    columns = ("id", "category", "location", "priority", "status", "created")
-    headings = ("ID", "Category", "Location", "Priority", "Status", "Submitted")
-    widths = (80, 120, 130, 70, 100, 130)
+    columns = ("id", "category", "location", "status", "created")
+    headings = ("ID", "Category", "Location", "Status", "Submitted")
+    widths = (80, 120, 130, 100, 130)
 
     tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
     for col, head, w in zip(columns, headings, widths):
@@ -366,7 +338,7 @@ def show_student_dashboard(root, user, on_logout):
 
     info_vars = {}
     for key, title in (("category", "Category"), ("location", "Location"),
-                       ("priority", "Priority"), ("department", "Handled by"),
+                       ("department", "Handled by"),
                        ("created", "Submitted")):
         row = tk.Frame(inner, bg=WHITE)
         row.pack(fill="x", pady=1)
@@ -405,7 +377,6 @@ def show_student_dashboard(root, user, on_logout):
         update_progress(c["status"])
         info_vars["category"].set(c["category"])
         info_vars["location"].set(c["location"])
-        info_vars["priority"].set(c.get("priority", "Medium"))
         info_vars["department"].set(c.get("department") or "Unassigned")
         info_vars["created"].set(c["created_at"])
         _set_text(detail_desc, c["description"])
@@ -449,7 +420,7 @@ def show_student_dashboard(root, user, on_logout):
             current_rows[cid] = c
             tree.insert("", "end", iid=str(cid), tags=(c["status"],), values=(
                 database.format_complaint_id(cid), c["category"], c["location"],
-                c.get("priority", "Medium"), c["status"], c["created_at"][:16],
+                c["status"], c["created_at"][:16],
             ))
 
         if not all_rows:

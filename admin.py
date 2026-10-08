@@ -30,7 +30,6 @@ SUCCESS = "#16A34A"
 WARNING = "#F59E0B"
 
 STATUSES = ("Pending", "In Progress", "Resolved")
-PRIORITIES = ("Low", "Medium", "High")
 DEPARTMENTS = (
     "Unassigned", "Electrical", "Civil / Maintenance", "IT / Network",
     "Housekeeping", "Air Conditioning", "Hostel Administration",
@@ -142,7 +141,6 @@ def show_admin_dashboard(root, user, on_logout):
 
     status_var = tk.StringVar(value="All")
     category_var = tk.StringVar(value="All")
-    priority_var = tk.StringVar(value="All")
 
     def _filter_box(label, var, values):
         box = tk.Frame(filters, bg=BG)
@@ -156,7 +154,6 @@ def show_admin_dashboard(root, user, on_logout):
 
     _filter_box("Status", status_var, ["All"] + list(STATUSES))
     category_combo = _filter_box("Category", category_var, ["All"] + list(DEFAULT_CATEGORIES))
-    _filter_box("Priority", priority_var, ["All"] + list(PRIORITIES))
 
     search_box = tk.Frame(filters, bg=BG)
     search_box.pack(side="left", padx=(0, 12))
@@ -181,9 +178,9 @@ def show_admin_dashboard(root, user, on_logout):
     table_frame = tk.Frame(content, bg=WHITE, highlightbackground=BORDER, highlightthickness=1)
     table_frame.pack(side="left", fill="both", expand=True)
 
-    columns = ("id", "student", "category", "location", "priority", "status", "department", "created")
-    headings = ("ID", "Student", "Category", "Location", "Priority", "Status", "Department", "Submitted")
-    widths = (80, 110, 110, 110, 70, 90, 120, 120)
+    columns = ("id", "student", "category", "location", "status", "department", "created")
+    headings = ("ID", "Student", "Category", "Location", "Status", "Department", "Submitted")
+    widths = (80, 110, 110, 110, 90, 120, 120)
 
     tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
     for col, head, w in zip(columns, headings, widths):
@@ -213,7 +210,7 @@ def show_admin_dashboard(root, user, on_logout):
 
     info_vars = {}
     for key, title in (("student", "Student"), ("category", "Category"),
-                       ("location", "Location"), ("priority", "Priority"),
+                       ("location", "Location"),
                        ("created", "Submitted")):
         row = tk.Frame(inner, bg=WHITE)
         row.pack(fill="x", pady=1)
@@ -272,7 +269,6 @@ def show_admin_dashboard(root, user, on_logout):
         info_vars["student"].set(c.get("student_name", "—"))
         info_vars["category"].set(c["category"])
         info_vars["location"].set(c["location"])
-        info_vars["priority"].set(c.get("priority", "Medium"))
         info_vars["created"].set(c["created_at"])
         _set_text(desc_text, c["description"])
         dept_var.set(c.get("department") or DEPARTMENTS[0])
@@ -309,11 +305,11 @@ def show_admin_dashboard(root, user, on_logout):
         category_combo.config(values=["All"] + categories)
 
         # table
-        rows = database.get_all_complaints(
-            status_filter=status_var.get(),
-            category_filter=category_var.get(),
-            priority_filter=priority_var.get(),
-        )
+        rows = database.get_all_complaints()
+        if status_var.get() != "All":
+            rows = [c for c in rows if c["status"] == status_var.get()]
+        if category_var.get() != "All":
+            rows = [c for c in rows if c["category"] == category_var.get()]
         term = search_var.get().strip().lower()
         if term:
             def matches(c):
@@ -330,7 +326,7 @@ def show_admin_dashboard(root, user, on_logout):
             current_rows[cid] = c
             tree.insert("", "end", iid=str(cid), tags=(c["status"],), values=(
                 database.format_complaint_id(cid), c.get("student_name", ""),
-                c["category"], c["location"], c.get("priority", "Medium"),
+                c["category"], c["location"],
                 c["status"], c["department"], c["created_at"][:16],
             ))
         count_label.config(text=f"Showing {len(rows)} of {stats['total']} complaints")
@@ -361,7 +357,12 @@ def show_admin_dashboard(root, user, on_logout):
             set_message("Please choose a valid status.", ERROR)
             return
 
-        database.update_complaint_status(cid, new_status, department)
+        try:
+            database.update_complaint_status(cid, new_status)
+            database.assign_department(cid, department)
+        except Exception as error:
+            set_message(f"Could not save the changes: {error}", ERROR)
+            return
         load_table()
         set_message(f"{database.format_complaint_id(cid)} updated successfully.", SUCCESS)
 
@@ -381,13 +382,13 @@ if __name__ == "__main__":
         student = database.authenticate_user("student@campus.edu", "student123")
         if student:
             samples = [
-                ("Air Conditioning", "Room 301", "AC is not cooling in the classroom.", "High"),
-                ("Furniture", "Library", "Two chairs have broken legs.", "Low"),
-                ("Internet", "Hostel Block B", "Wi-Fi keeps disconnecting every few minutes.", "Medium"),
-                ("Electrical", "Lab 2", "Tube light flickering near the entrance.", "Medium"),
+                ("Air Conditioning", "Room 301", "AC is not cooling in the classroom."),
+                ("Furniture", "Library", "Two chairs have broken legs."),
+                ("Internet", "Hostel Block B", "Wi-Fi keeps disconnecting every few minutes."),
+                ("Electrical", "Lab 2", "Tube light flickering near the entrance."),
             ]
-            for cat, loc, desc, pri in samples:
-                database.add_complaint(student["user_id"], cat, loc, desc, pri)
+            for cat, loc, desc in samples:
+                database.add_complaint(student["user_id"], cat, loc, desc)
 
     test_root = tk.Tk()
     test_root.title("CampusCare - Admin Test")
